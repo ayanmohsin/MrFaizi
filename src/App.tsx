@@ -5,6 +5,7 @@ import { SignageControls } from "./components/SignageControls";
 import { ConfirmationDrawer } from "./components/ConfirmationDrawer";
 import { MenuOverviewModal } from "./components/MenuOverviewModal";
 import { SlideManagerModal } from "./components/SlideManagerModal";
+import { AdminPinModal } from "./components/AdminPinModal";
 import { showroomAudio } from "./utils/audioChime";
 import {
   loadGroupsFromStorage,
@@ -13,6 +14,7 @@ import {
   saveRestaurantInfoToStorage,
   clearSignageStorage,
 } from "./utils/signageStorage";
+import { pushToCloud, fetchFromCloud } from "./utils/cloudSyncService";
 import { Tv, Sparkles, Sliders, ChevronRight } from "lucide-react";
 
 export default function App() {
@@ -28,6 +30,7 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,10 +41,11 @@ export default function App() {
   const visibleGroups = groups.filter((g) => g.isVisible !== false);
   const activeSlidePool = visibleGroups.length > 0 ? visibleGroups : groups;
 
-  // Load saved slides, photos, and restaurant branding from IndexedDB / local storage
+  // Load saved slides, photos, and restaurant branding from Cloud Server + local storage
   useEffect(() => {
     async function initStorage() {
       try {
+        // 1. First load local cache
         const [savedGroups, savedInfo] = await Promise.all([
           loadGroupsFromStorage(),
           loadRestaurantInfoFromStorage(),
@@ -52,6 +56,19 @@ export default function App() {
         if (savedInfo) {
           setRestaurantInfo(savedInfo);
         }
+
+        // 2. Then check Cloud Server for any remote updates made from phone or another PC
+        try {
+          const cloudRecord = await fetchFromCloud();
+          if (cloudRecord && cloudRecord.groups && cloudRecord.groups.length > 0) {
+            setGroups(cloudRecord.groups);
+            if (cloudRecord.restaurantInfo) {
+              setRestaurantInfo(cloudRecord.restaurantInfo);
+            }
+          }
+        } catch (cloudErr) {
+          console.log("Cloud poll initial fetch error:", cloudErr);
+        }
       } catch (err) {
         console.error("Failed to load saved signage data:", err);
       } finally {
@@ -59,7 +76,37 @@ export default function App() {
       }
     }
     initStorage();
+
+    // 3. Periodic Cloud Sync (every 60 seconds) so TV auto-updates live when owner edits from mobile
+    const cloudPollInterval = setInterval(async () => {
+      try {
+        const cloudRecord = await fetchFromCloud();
+        if (cloudRecord && cloudRecord.groups) {
+          const lastVersion = Number(localStorage.getItem("last_cloud_version") || "0");
+          if (cloudRecord.version && cloudRecord.version > lastVersion) {
+            setGroups(cloudRecord.groups);
+            if (cloudRecord.restaurantInfo) {
+              setRestaurantInfo(cloudRecord.restaurantInfo);
+            }
+            localStorage.setItem("last_cloud_version", String(cloudRecord.version));
+          }
+        }
+      } catch (e) {
+        // silent background sync
+      }
+    }, 60000);
+
+    return () => clearInterval(cloudPollInterval);
   }, []);
+
+  // Handler to trigger immediate Cloud Sync
+  const handleSyncToCloud = async (): Promise<boolean> => {
+    const success = await pushToCloud(groups, restaurantInfo);
+    if (success) {
+      localStorage.setItem("last_cloud_version", String(Date.now()));
+    }
+    return success;
+  };
 
   // Auto-save groups when modified
   useEffect(() => {
@@ -228,7 +275,7 @@ export default function App() {
       } else if (e.key.toLowerCase() === "m") {
         handleToggleMute();
       } else if (e.key.toLowerCase() === "e") {
-        setIsManagerOpen(true);
+        setIsPinModalOpen(true);
       }
     };
 
@@ -271,9 +318,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Quick Edit Manager Button */}
+            {/* Quick Edit Manager Button with PIN Protection */}
             <button
-              onClick={() => setIsManagerOpen(true)}
+              onClick={() => setIsPinModalOpen(true)}
               className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1.5 transition-colors"
             >
               <Sliders className="w-3.5 h-3.5 text-emerald-400" />
@@ -333,7 +380,7 @@ export default function App() {
         onToggleFullscreen={handleToggleFullscreen}
         onOpenConfirmation={() => setIsConfirmationOpen(true)}
         onOpenOverview={() => setIsOverviewOpen(true)}
-        onOpenManager={() => setIsManagerOpen(true)}
+        onOpenManager={() => setIsPinModalOpen(true)}
       />
 
       {/* Signage Display Manager (Hide Slides, Upload Image, Edit Prices, Brand Name & Logo) */}
@@ -347,6 +394,17 @@ export default function App() {
         onUpdateGroup={handleUpdateGroup}
         onResetAll={handleResetAll}
         onSelectSlide={goToSlide}
+        onSyncToCloud={handleSyncToCloud}
+      />
+
+      {/* Admin Security PIN Dialog */}
+      <AdminPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={() => {
+          setIsPinModalOpen(false);
+          setIsManagerOpen(true);
+        }}
       />
 
       {/* Confirmation & Taglines Modal */}

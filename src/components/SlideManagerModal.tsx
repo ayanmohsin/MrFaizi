@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ProductGroup, MenuItem, RestaurantInfo } from "../data/menuData";
 import { compressImageFile } from "../utils/imageCompressor";
 import { uploadToImgBB } from "../utils/imgbbService";
+import { setAdminPin, DEFAULT_ADMIN_PIN, PIN_STORAGE_KEY } from "../utils/cloudSyncService";
 import {
   X,
   Eye,
@@ -23,6 +24,8 @@ import {
   Save,
   Loader2,
   CloudUpload,
+  KeyRound,
+  RefreshCw,
 } from "lucide-react";
 
 interface SlideManagerModalProps {
@@ -35,6 +38,7 @@ interface SlideManagerModalProps {
   onUpdateGroup: (updatedGroup: ProductGroup) => void;
   onResetAll: () => void;
   onSelectSlide: (index: number) => void;
+  onSyncToCloud?: () => Promise<boolean>;
 }
 
 export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
@@ -47,8 +51,9 @@ export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
   onUpdateGroup,
   onResetAll,
   onSelectSlide,
+  onSyncToCloud,
 }) => {
-  const [activeTab, setActiveTab] = useState<"slides" | "branding">("slides");
+  const [activeTab, setActiveTab] = useState<"slides" | "branding" | "security">("slides");
   const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || "");
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [newItemName, setNewItemName] = useState("");
@@ -56,7 +61,10 @@ export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
   const [newItemDesc, setNewItemDesc] = useState("");
   const [newImageUrl, setNewImageUrl] = useState("");
   const [isUploadingCloud, setIsUploadingCloud] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [newPinValue, setNewPinValue] = useState("");
+  const [pinChangeSuccess, setPinChangeSuccess] = useState(false);
 
   if (!isOpen) return null;
 
@@ -258,8 +266,8 @@ export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
             </div>
           </div>
 
-          {/* Tab Switcher: Slides vs Brand Profile */}
-          <div className="flex items-center gap-1.5 p-1 bg-zinc-900 border border-white/10 rounded-2xl">
+          {/* Tab Switcher: Slides vs Brand Profile vs PIN Security */}
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-900 border border-white/10 rounded-2xl flex-wrap">
             <button
               onClick={() => setActiveTab("slides")}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
@@ -282,9 +290,49 @@ export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
               <Building2 className="w-3.5 h-3.5" />
               <span>Company Name & Logo</span>
             </button>
+            <button
+              onClick={() => setActiveTab("security")}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                activeTab === "security"
+                  ? "bg-amber-500 text-black shadow-md"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>PIN Security & Sync</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
+            {onSyncToCloud && (
+              <button
+                disabled={isSyncingCloud}
+                onClick={async () => {
+                  setIsSyncingCloud(true);
+                  try {
+                    const ok = await onSyncToCloud();
+                    if (ok) {
+                      setUploadMessage("TVs & Devices Synced!");
+                    } else {
+                      setUploadMessage("Sync saved locally!");
+                    }
+                  } finally {
+                    setIsSyncingCloud(false);
+                    setTimeout(() => setUploadMessage(null), 3000);
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs flex items-center gap-1.5 shadow transition-all"
+                title="Sync all photos & prices to Cloud so Smart TVs get them instantly"
+              >
+                {isSyncingCloud ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CloudUpload className="w-3.5 h-3.5" />
+                )}
+                <span>{isSyncingCloud ? "Syncing..." : "Sync to TV & Cloud"}</span>
+              </button>
+            )}
+
             <button
               onClick={onResetAll}
               className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-zinc-300 flex items-center gap-1.5 transition-colors"
@@ -487,6 +535,94 @@ export const SlideManagerModal: React.FC<SlideManagerModalProps> = ({
                 >
                   Continue to Slide Photos →
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: SECURITY PIN & CLOUD SYNC SETTINGS */}
+        {activeTab === "security" && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="max-w-2xl mx-auto space-y-6">
+              {/* PIN Management Box */}
+              <div className="p-6 rounded-3xl bg-zinc-950 border border-white/10 shadow-xl space-y-6">
+                <div className="flex items-center gap-3 pb-4 border-b border-white/10">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <KeyRound className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white">
+                      Owner Security PIN Protection
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Settings panel kholne ke liye password zaroori hai taake koi anjaan shakhs prices na badal sake.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-zinc-900 border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-400">Current Default PIN:</span>
+                    <span className="text-sm font-mono font-bold text-amber-400 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                      {localStorage.getItem(PIN_STORAGE_KEY) || DEFAULT_ADMIN_PIN}
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono uppercase text-zinc-400 mb-1">
+                      Change Security PIN (Set New 4 to 8 Digits)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        maxLength={8}
+                        value={newPinValue}
+                        onChange={(e) => {
+                          setNewPinValue(e.target.value);
+                          setPinChangeSuccess(false);
+                        }}
+                        placeholder="Enter new PIN..."
+                        className="flex-1 px-4 py-2.5 bg-zinc-950 border border-white/10 rounded-xl text-base font-mono font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newPinValue.trim().length >= 4) {
+                            setAdminPin(newPinValue);
+                            setPinChangeSuccess(true);
+                            setNewPinValue("");
+                            setTimeout(() => setPinChangeSuccess(false), 3000);
+                          }
+                        }}
+                        disabled={newPinValue.trim().length < 4}
+                        className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-extrabold text-xs rounded-xl transition-all shadow"
+                      >
+                        Update PIN
+                      </button>
+                    </div>
+                    {pinChangeSuccess && (
+                      <p className="text-xs text-emerald-400 font-semibold mt-2 flex items-center gap-1">
+                        <Check className="w-4 h-4" />
+                        <span>PIN kamyabi se tabdeel ho gaya hai!</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Universal Cloud Sync Status */}
+                <div className="p-4 rounded-2xl bg-zinc-900 border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CloudUpload className="w-5 h-5 text-amber-400" />
+                      <span className="text-sm font-bold text-white">Universal Cloud Sync</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
+                      Auto-Sync Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Aap jab bhi mobile ya laptop se photo upload karein ya price change karein, upar <strong>"Sync to TV & Cloud"</strong> ka button dabayein. Dukan ki Smart TV khud-ba-khud naya data download kar legi.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
