@@ -1,0 +1,6 @@
+{
+  "name": "MR FAIZI Digital Signage Showroom",
+  "description": "High-impact 16:9 commercial showroom digital signage display system for MR FAIZI restaurant menu groups.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
